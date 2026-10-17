@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""把内核不认识的 ext4 ro_compat 特性位清掉，好让镜像能 rw 挂载。
+
+背景
+----
+小米这些分区镜像带着 largest_file(0x4000)。这个特性是 e2fsprogs >= 1.47 在 mkfs
+时写进超级块的，只记录一个「最大文件大小」的统计数字，Linux 内核到 6.8 都还没
+实现。内核发现不认识的 ro_compat 位就直接拒绝读写挂载，dmesg 里留的是这句：
+
+    EXT4-fs (loop0): couldn't mount RDWR because of unsupported optional features (4000)
+
+只读挂载是允许的 —— 所以 mkfs 自己做的测试镜像能挂上（它没这个位），小米的不行。
+
+清掉这个位对文件内容、inode、权限、SELinux 上下文都没有任何影响：它不是数据。
+但改过超级块之后 s_checksum 就对不上了，所以下一步必须跑 e2fsck 重算校验和。
+
+用法: fix_ext4_features.py <ext4-image>
+"""
+import struct
+import sys
+
+SUPERBLOCK_OFFSET = 1024
+S_RO_COMPAT = SUPERBLOCK_OFFSET + 0x64  # struct ext4_super_block::s_feature_ro_compat
+
+# Linux 6.8（ubuntu-24.04 runner 的内核）里的 EXT4_FEATURE_RO_COMPAT_SUPP。
+# 只保留这些位，其它一律清掉。
+KERNEL_SUPP = (
+    0x0001 |      # sparse_super
+    0x0002 |      # large_file
+    0x0004 |      # btree_dir
+    0x0008 |      # huge_file
+    0x0010 |      # gdt_csum (uninit_bg)
+    0x0020 |      # dir_nlink
+    0x0040 |      # extra_isize
+    0x0100 |      # quota
+    0x0200 |      # bigalloc
+    0x0400 |      # metadata_csum
+    0x1000 |      # readonly
+    0x2000 |      # project
+    0x8000 |      # verity
+    0x10000       # orphan_present
+)
+
+
+def selftest() -> int:
+    """偏移量一旦算错，改坏的是分区表看起来完全正常的 super —— 必须挡住。"""
+    import os
+    import struct as st
+    import tempfile
+
+    SB = SUPERBLOCK_OFFSET
+
+    def mk(ro: int, magic: int = 0xEF53) -> str:
+        buf = bytearray(2048)
+        st.pack_into("<H", buf, SB + 0x38, magic)
+        st.pack_into("<I", buf, SB + 0x64, ro)
+        p = os.path.join(tempfile.gettempdir(), "fix_ext4_selftest.img")
+        with open(p, "wb") as fh:
+            fh.write(buf)
+        return p
+
+    def after(p: str) -> int:
+        with open(p, "rb") as fh:
+            return st.unpack_from("<I", fh.read(), SB + 0x64)[0]
+
+    cases = [
+        ("小米镜像：带 largest_file(0x4000)", 0x046B | 0x4000, 0x046B),
+        ("本来就干净，不能误伤", 0x046B, 0x046B),
+        ("多个未知位 0x4000|0x0800", 0x046B | 0x4000 | 0x0800, 0x046B),
+        ("orphan_present(0x10000) 内核支持，保留", 0x046B | 0x4000 | 0x10000, 0x1046B),
+        ("metadata_csum(0x400) 保留", 0x0400 | 0x4000, 0x0400),
+    ]
+    failed = 0
+    for name, inp, exp in cases:
+        p = mk(inp)
+        patch(p)
+        got = after(p)
+        ok = got == exp
+        failed += 0 if ok else 1
+        print(f"    [{'PASS' if ok else 'FAIL'}] {name}: 0x{inp:05x} -> 0x{got:05x} (期望 0x{exp:05x})")
+
+    # 非 ext4 文件一个字节都不能动
+    p = mk(0, magic=0)
+    buf_before = open(p, "rb").read()
+    patch(p)
+    ok = open(p, "rb").read() == buf_before
+    failed += 0 if ok else 1
+    print(f"    [{'PASS' if ok else 'FAIL'}] 非 ext4 不改动")
+    os.remove(p)
+
+    return 1 if failed else 0
+
+
+def patch(img: str) -> None:
+    """把 img 超级块里内核不认识的 ro_compat 位清掉。非 ext4 文件原样不动。"""
+    with open(img, "r+b") as f:
+        f.seek(SUPERBLOCK_OFFSET + 0x38)  # s_magic
+        magic = struct.unpack("<H", f.read(2))[0]
+        if magic != 0xEF53:
+            print("    不是 ext4 (magic=0x%04x)，不动它" % magic)
+            return
+
+        f.seek(S_RO_COMPAT)
+        raw = struct.unpack("<I", f.read(4))[0]
+        new = raw & KERNEL_SUPP
+        print("    ro_compat: 0x%05x -> 0x%05x   (清掉 0x%05x)" % (raw, new, raw & ~KERNEL_SUPP))
+        if new == raw:
+            return
+
+        f.seek(S_RO_COMPAT)
+        f.write(struct.pack("<I", new))
+
+    # 超级块校验和 (s_checksum，偏移 0x3FC) 现在对不上了，交给 e2fsck 重算写回。
+    print("    已改写超级块，等 e2fsck 重算校验和")
+
+
+def main() -> int:
+    if len(sys.argv) == 2 and sys.argv[1] == "--selftest":
+        return selftest()
+    if len(sys.argv) != 2:
+        print("usage: fix_ext4_features.py <ext4-image> | --selftest", file=sys.stderr)
+        return 2
+
+    patch(sys.argv[1])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

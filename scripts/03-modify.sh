@@ -37,11 +37,23 @@ mount_diag() {
 
 # $1=镜像 $2=挂载点；成功返回 0
 mount_img() {
-  local img="$1" dir="$2" loop="" e2log
+  local img="$1" dir="$2" loop="" e2log name
+  name=$(basename "$dir")
   sudo mkdir -p "$dir"
 
-  # 先 fsck 一遍：镜像若有元数据问题，挂载时只会回一句很含糊的 bad superblock
-  e2log="/tmp/e2fsck-$(basename "$dir").txt"
+  # 小米的 ext4 带着内核不认识的 ro_compat 位（largest_file=0x4000，e2fsprogs>=1.47
+  # 写的，内核到 6.8 都没实现）。内核发现不认识就拒绝 rw 挂载，dmesg 里是这句：
+  #   EXT4-fs (loop0): couldn't mount RDWR because of unsupported optional features (4000)
+  # 先把超级块摊开看一眼，再清掉内核不支持的位。
+  echo "  $name 超级块："
+  sudo tune2fs -l "$img" 2>/dev/null \
+    | grep -E '^(Filesystem features|Filesystem OS type|Filesystem rev)' \
+    | sed 's/^/    /' || echo "    (tune2fs 读不出来)"
+  python3 "$REPO/scripts/fix_ext4_features.py" "$img" \
+    || echo "::warning::清理 ro_compat 特性失败，继续硬试挂载"
+
+  # 动过超级块就必须 fsck 一遍，把校验和重算回来
+  e2log="/tmp/e2fsck-$name.txt"
   sudo e2fsck -fy "$img" > "$e2log" 2>&1 || true
   echo "  fsck: $(tail -1 "$e2log")"
 

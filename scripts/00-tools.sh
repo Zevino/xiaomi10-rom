@@ -154,6 +154,12 @@ if [ "$(stat -c%s "$TMP/w/super_new.img")" -ne 16777216 ]; then
 fi
 lpdump "$TMP/w/super_new.img" >/dev/null && echo "  ✓ 重建的 super 尺寸完整，且能被 lpdump 正常读回"
 
+echo "--- 自检：fix_ext4_features.py 偏移量 ---"
+# 改的是超级块偏移 0x64。算错的话，产出是一个分区表完全正常、内容却是坏的
+# super，而且不会报错。所以这个自检必须在下载 5GB 之前跑。
+python3 "$REPO/scripts/fix_ext4_features.py" --selftest \
+  || { echo "::error::fix_ext4_features.py 自检未通过，先别下载 ROM"; exit 1; }
+
 echo "--- 环境自检：loop 挂载 ext4 ---"
 # 03-modify 全靠 mount -o loop 改文件。这里拿一个新做的 ext4 提前试挂一次，
 # 免得 5GB 下载 + 解包跑完 30 分钟，才发现 runner 根本不支持 loop 挂载。
