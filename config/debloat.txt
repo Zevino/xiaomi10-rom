@@ -1,0 +1,51 @@
+# ==========================================================================
+#  去预装清单
+#  格式：  <分区>:<相对路径>        （建议末尾加 * 提高匹配率）
+#  - 分区名取 lpunpack 输出：system / system_ext / product / vendor / odm
+#  - 路径写“挂载后看到的路径”，脚本会自动兼容 /xxx 与 /system/xxx 两种布局，
+#    并且会忽略大小写兜底（所以大小写写错也没关系）。
+#  - 找不到的条目会被自动跳过，所以这里写多了不会炸，只是没效果。
+#  - ★ 第一次跑请先去看 logs/apps.txt，里面有真实文件夹名，按它来定稿。
+#  - ★ 不要乱删 system/framework、system/priv-app 下的系统核心组件，
+#    删错会开机卡 logo。不确定的条目保持注释状态。
+# ==========================================================================
+
+# ---------- 推广 / 商城 / 广告类（一般安全） ----------
+system:priv-app/Miuibrowser*
+system:app/Mishop*
+system:app/Miuisupermarket*
+system:app/Miuinews*
+system:priv-app/Miuinews*
+system:app/Miwalpaper*
+system:app/Miuiwallpaperpicker*
+system:app/Miuiyellowpage*
+
+# ---------- 小米生态 App（看你要不要） ----------
+system:app/Migamecenter*
+system:app/Migame*
+system:app/Miuicommunity*
+system:app/Miuivideo*
+system:app/Miuivideoplayer*
+system:app/Miuimusic*
+system:app/MiReader*
+system:app/Duokanreader*
+system:app/Aiasst*
+system:app/Miuiscanner*
+system:priv-app/Miuiscanner*
+
+# ---------- 用户反馈 / 统计（一般安全） ----------
+system:app/Miuibugreport*
+system:priv-app/Miuibugreport*
+system:app/Miuianalytics*
+system:priv-app/Miuianalytics*
+
+# ---------- 以下默认不动（列出供你参考，需要时去掉行首的 #）----------
+# system:app/Miuigallery*              # 图库，删了没相册
+# system:app/Miuicamera*               # 相机
+# system:app/Miuicompass*              # 指南针
+# system:app/Miuinote*                 # 便签
+# system:app/Miuibackup*               # 本地备份
+# system:app/Miremote*                 # 万能遥控（红外）
+# system:app/Miuisoundrecorder*        # 录音机
+# system:priv-app/Miuisecuritycenter*  # 安全中心（含权限管理，别删）
+# system:priv-app/Miui*                # 小米框架系列，别删

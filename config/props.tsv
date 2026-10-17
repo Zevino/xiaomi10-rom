@@ -1,0 +1,25 @@
+# ==========================================================================
+#  props 修改清单
+#  格式：  <分区>:<相对文件路径>:<键>=<值>
+#  - 键已存在就替换，不存在就追加到文件末尾。
+#  - 路径同样兼容 /xxx 与 /system/xxx 两种布局。
+#  - 值里不要带 # 号（会被当注释）。
+#  - 默认全部注释掉（等于不做任何修改）。需要哪条去掉行首的 #。
+# ==========================================================================
+
+# ---------- 改机型名（最常见的需求）----------
+# 小米10青春版 国行内部名是 “Mi 10 Youth Edition / 小米10青春版”，
+# 海外名是 “Mi 10 Lite Zoom”。想让 App 认成海外版就改成后者。
+#
+# system:build.prop:ro.product.model=Xiaomi Mi 10 Lite Zoom
+# system:build.prop:ro.product.system.model=Xiaomi Mi 10 Lite Zoom
+# vendor:build.prop:ro.product.vendor.model=Xiaomi Mi 10 Lite Zoom
+# product:etc/build.prop:ro.product.product.model=Xiaomi Mi 10 Lite Zoom
+# system_ext:etc/build.prop:ro.product.system_ext.model=Xiaomi Mi 10 Lite Zoom
+
+# ---------- 其它常见的可调项（示例，按需启用）----------
+# 关掉部分 MIUI 统计/推广开关（不保证每个版本都生效）
+# system:build.prop:ro.miui.support_touch_cover=false
+# 提高 VM 堆上限（某些游戏/App 会用到）
+# system:build.prop:dalvik.vm.heapgrowthlimit=256m
+# system:build.prop:dalvik.vm.heapsize=512m

@@ -1,0 +1,9 @@
+# 运行产物（这些都在 CI 的 /mnt/rom 里，本机一般用不到）
+logs/
+__pycache__/
+*.pyc
+*.img
+*.img.part-*
+*.tgz
+*.tar
+*.zip

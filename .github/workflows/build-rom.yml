@@ -1,0 +1,109 @@
+name: Build vangogh ROM
+
+# 手动触发：仓库页面 -> Actions -> 左侧 "Build vangogh ROM" -> Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      rom_url:
+        description: "Fastboot ROM .tgz 的直链（优先用这个，能省一次 6GB 上传；留空则用下面的 Release）"
+        required: false
+        default: ""
+      rom_release_tag:
+        description: "或用本仓库的 Release 标签：里面放着 ROM 的切片文件（*.tgz 或 *.tgz.part-*）"
+        required: false
+        default: ""
+      do_debloat:
+        description: "执行去预装（删除 config/debloat.txt 里列出的路径）"
+        type: boolean
+        default: true
+      apply_props:
+        description: "执行属性修改（config/props.tsv，可用于改机型名）"
+        type: boolean
+        default: true
+      build_super:
+        description: "重组完整 super.img（推荐。关掉则只产出改过的 system 分区镜像）"
+        type: boolean
+        default: true
+      out_release_tag:
+        description: "结果发布到哪个 Release 标签（留空=自动 rom-<运行号>）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+
+      - name: 清理磁盘（腾出 ~30GB）
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: 准备目录
+        run: |
+          sudo mkdir -p /mnt/rom
+          sudo chown -R "$USER":"$USER" /mnt/rom
+          df -h / /mnt || true
+
+      - name: 安装工具
+        run: bash scripts/00-tools.sh
+
+      - name: 拉取 ROM
+        env:
+          ROM_URL: ${{ inputs.rom_url }}
+          ROM_RELEASE_TAG: ${{ inputs.rom_release_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/01-fetch-rom.sh
+
+      - name: 解包 super
+        run: bash scripts/02-unpack.sh
+
+      - name: 修改内容
+        env:
+          DO_DEBLOAT: ${{ inputs.do_debloat }}
+          APPLY_PROPS: ${{ inputs.apply_props }}
+        run: bash scripts/03-modify.sh
+
+      - name: 重打包
+        env:
+          BUILD_SUPER: ${{ inputs.build_super }}
+        run: bash scripts/04-repack.sh
+
+      - name: 收集日志
+        if: always()
+        run: |
+          mkdir -p logs
+          cp -a /mnt/rom/logs/. logs/ 2>/dev/null || true
+          {
+            echo "==== date ===="; date -u
+            echo "==== df ===="; df -h / /mnt || true
+            echo "==== /mnt/rom ===="; ls -lhR /mnt/rom 2>/dev/null | head -300 || true
+          } > logs/env.txt
+
+      - name: 上传日志 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: logs/
+          if-no-files-found: warn
+
+      - name: 发布到 Release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OUT_TAG: ${{ inputs.out_release_tag }}
+        run: bash scripts/05-publish.sh
