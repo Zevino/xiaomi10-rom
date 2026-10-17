@@ -50,12 +50,31 @@ ls -lh "$BUILD/super_raw.img"
 echo "== 转成稀疏镜像（体积约减半，便于下载）=="
 img2simg "$BUILD/super_raw.img" "$BUILD/super.img"
 
-echo "== 校验：能否被 lpdump 正常读回 =="
-lpdump "$BUILD/super.img" > "$LOGS/lpdump_new.txt" 2>&1 && echo "回读 OK" || {
-  echo "::warning::lpdump 读不回新 super，先不删 raw"
+echo "== 校验：lpdump 读 raw，展开稀疏后与 raw 比对，且分区表与原厂一致 =="
+# 1) 用 lpdump 读 raw 这才有意义
+lpdump "$BUILD/super_raw.img" > "$LOGS/lpdump_new.txt" 2>&1 || {
+  echo "::error::lpdump 读不回新 super_raw.img"
+  tail -40 "$LOGS/lpdump_new.txt"
+  exit 1
 }
-tail -40 "$LOGS/lpdump_new.txt" || true
+echo "回读 raw OK"
+echo "  new lpdump 已写入 $LOGS/lpdump_new.txt"
 
-rm -f "$BUILD/super_raw.img"
+# 2) 把稀疏展开再比对，证明稀疏封装是完整的
+simg2img "$BUILD/super.img" "$BUILD/super_expanded.img"
+cmp "$BUILD/super_raw.img" "$BUILD/super_expanded.img" || {
+  echo "::error::稀疏镜像展开后与 raw 不一致"
+  exit 1
+}
+echo "稀疏与 raw 完全一致"
+
+# 3) 把原厂 lpdump.txt 一并传入（脚本在 REPO? 但 lpdump.txt 在 $LOGS/lpdump.txt）
+if [ -f "$LOGS/lpdump.txt" ]; then
+  python3 "$REPO/scripts/verify_lpdump.py" "$LOGS/lpdump.txt" "$LOGS/lpdump_new.txt" || exit 1
+else
+  echo "::warning::没有找到 $LOGS/lpdump.txt，跳过分区表对比"
+fi
+
+rm -f "$BUILD/super_raw.img" "$BUILD/super_expanded.img"
 echo "== 完成 =="
 ls -lh "$BUILD"
