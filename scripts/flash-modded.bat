@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 REM ============================================================
 REM  小米10青春版 (vangogh) 刷入改过的 super.img
 REM
@@ -30,8 +31,12 @@ if errorlevel 1 (
 
 if not exist "super.img" (
   echo [错误] 当前目录没有 super.img。
-  echo        如果下载到的是 super.img.part-aa 之类切片，请先合并：
-  echo        copy /b super.img.part-aa+super.img.part-ab+super.img.part-ac super.img
+  echo        如果下载到的是 super.img.part-aa 之类切片，先校验再合并：
+  echo.
+  echo          certutil -hashfile super.img.part-aa SHA256     (逐个和 SHA256SUMS.txt 比对)
+  echo          copy /b super.img.part-aa+super.img.part-ab+super.img.part-ac+super.img.part-ad+super.img.part-ae super.img
+  echo.
+  echo        合并后应约 8.5 GB；小很多说明有分片没下全。
   pause
   exit /b 1
 )
