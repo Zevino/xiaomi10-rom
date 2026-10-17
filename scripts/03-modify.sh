@@ -39,33 +39,42 @@ mount_diag() {
 mount_img() {
   local img="$1" dir="$2" loop="" e2log name
   name=$(basename "$dir")
+  e2log="/tmp/e2fsck-$name.txt"
   sudo mkdir -p "$dir"
 
   # 小米的 ext4 带着内核不认识的 ro_compat 位（largest_file=0x4000，e2fsprogs>=1.47
   # 写的，内核到 6.8 都没实现）。内核发现不认识就拒绝 rw 挂载，dmesg 里是这句：
   #   EXT4-fs (loop0): couldn't mount RDWR because of unsupported optional features (4000)
-  # 先把超级块摊开看一眼，再清掉内核不支持的位。
   echo "  $name 超级块："
   sudo tune2fs -l "$img" 2>/dev/null \
-    | grep -E '^(Filesystem features|Filesystem OS type|Filesystem rev)' \
-    | sed 's/^/    /' || echo "    (tune2fs 读不出来)"
-  python3 "$REPO/scripts/fix_ext4_features.py" "$img" \
-    || echo "::warning::清理 ro_compat 特性失败，继续硬试挂载"
+    | grep -E '^Filesystem features' | sed 's/^/    /' || echo "    (tune2fs 读不出来)"
 
-  # 动过超级块就必须 fsck 一遍，把校验和重算回来
-  e2log="/tmp/e2fsck-$name.txt"
+  # ---- 策略 1：只清掉内核不认识的位，改完 fsck 重算超级块校验和 ----
+  echo "  [策略1] 清掉内核不认识的 ro_compat 位"
+  python3 "$REPO/scripts/fix_ext4_features.py" "$img" || true
   sudo e2fsck -fy "$img" > "$e2log" 2>&1 || true
-  echo "  fsck: $(tail -1 "$e2log")"
-
+  echo "    fsck: $(tail -1 "$e2log")"
   if sudo mount -o loop,rw "$img" "$dir" 2>/dev/null; then return 0; fi
-  echo "  直接 loop 挂载失败，改用显式 losetup ..."
+  echo "    仍挂不上"
 
+  # ---- 策略 2：连 metadata_csum 一起清掉 ----
+  # 若策略1改完超级块后校验和没被 fsck 修好，内核会因为校验和不匹配继续拒绝。
+  # 清掉 metadata_csum(0x400) 之后内核干脆不去校验它，代价只是少一层完整性检查。
+  echo "  [策略2] 连 metadata_csum 一起清掉"
+  python3 "$REPO/scripts/fix_ext4_features.py" --no-csum "$img" || true
+  sudo e2fsck -fy "$img" > "$e2log" 2>&1 || true
+  echo "    fsck: $(tail -1 "$e2log")"
+  if sudo mount -o loop,rw "$img" "$dir" 2>/dev/null; then return 0; fi
+  echo "    仍挂不上"
+
+  # ---- 策略 3：显式 losetup 再挂 ----
+  echo "  [策略3] 显式 losetup 再挂"
   if loop=$(sudo losetup -f --show "$img" 2>/dev/null); then
-    echo "  分配到 $loop"
+    echo "    分配到 $loop"
     if sudo mount -o rw "$loop" "$dir" 2>/dev/null; then return 0; fi
     sudo losetup -d "$loop" 2>/dev/null || true
   else
-    echo "  losetup 分配不出 loop 设备"
+    echo "    losetup 分配不出 loop 设备"
   fi
   return 1
 }

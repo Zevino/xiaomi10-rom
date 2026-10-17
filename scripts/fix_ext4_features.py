@@ -79,6 +79,15 @@ def selftest() -> int:
         failed += 0 if ok else 1
         print(f"    [{'PASS' if ok else 'FAIL'}] {name}: 0x{inp:05x} -> 0x{got:05x} (期望 0x{exp:05x})")
 
+    # --no-csum 是策略 2 的兜底路径：连 metadata_csum 一起清，内核就不再校验超级块
+    p = mk(0x046B | 0x4000 | 0x0400)
+    patch(p, drop_extra=0x0400)
+    got = after(p)
+    ok = got == 0x006B
+    failed += 0 if ok else 1
+    print(f"    [{'PASS' if ok else 'FAIL'}] --no-csum 连 metadata_csum 一起清: "
+          f"0x0446b -> 0x{got:05x} (期望 0x0006b)")
+
     # 非 ext4 文件一个字节都不能动
     p = mk(0, magic=0)
     buf_before = open(p, "rb").read()
@@ -91,8 +100,13 @@ def selftest() -> int:
     return 1 if failed else 0
 
 
-def patch(img: str) -> None:
-    """把 img 超级块里内核不认识的 ro_compat 位清掉。非 ext4 文件原样不动。"""
+def patch(img: str, drop_extra: int = 0) -> None:
+    """把 img 超级块里内核不认识的 ro_compat 位清掉。非 ext4 文件原样不动。
+
+    drop_extra: 额外要清掉的位。策略 1 只清内核不认识的位；如果超级块校验和
+    没被 e2fsck 修好、挂载仍然失败，策略 2 会带上 metadata_csum(0x400) 再试一次
+    —— 校验和特性没了，内核就干脆不去校验它。
+    """
     with open(img, "r+b") as f:
         f.seek(SUPERBLOCK_OFFSET + 0x38)  # s_magic
         magic = struct.unpack("<H", f.read(2))[0]
@@ -102,8 +116,9 @@ def patch(img: str) -> None:
 
         f.seek(S_RO_COMPAT)
         raw = struct.unpack("<I", f.read(4))[0]
-        new = raw & KERNEL_SUPP
-        print("    ro_compat: 0x%05x -> 0x%05x   (清掉 0x%05x)" % (raw, new, raw & ~KERNEL_SUPP))
+        keep = KERNEL_SUPP & ~drop_extra
+        new = raw & keep
+        print("    ro_compat: 0x%05x -> 0x%05x   (清掉 0x%05x)" % (raw, new, raw & ~keep))
         if new == raw:
             return
 
@@ -115,13 +130,22 @@ def patch(img: str) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) == 2 and sys.argv[1] == "--selftest":
+    args = sys.argv[1:]
+    if args == ["--selftest"]:
         return selftest()
-    if len(sys.argv) != 2:
-        print("usage: fix_ext4_features.py <ext4-image> | --selftest", file=sys.stderr)
+
+    drop_extra = 0
+    if args and args[0] == "--no-csum":
+        # metadata_csum：清掉之后内核不再校验超级块/GDT 校验和，是策略 1 失败时的兜底
+        drop_extra = 0x0400
+        args = args[1:]
+
+    if len(args) != 1:
+        print("usage: fix_ext4_features.py [--no-csum] <ext4-image> | --selftest",
+              file=sys.stderr)
         return 2
 
-    patch(sys.argv[1])
+    patch(args[0], drop_extra)
     return 0
 
 
