@@ -154,5 +154,35 @@ if [ "$(stat -c%s "$TMP/w/super_new.img")" -ne 16777216 ]; then
 fi
 lpdump "$TMP/w/super_new.img" >/dev/null && echo "  ✓ 重建的 super 尺寸完整，且能被 lpdump 正常读回"
 
+echo "--- 环境自检：loop 挂载 ext4 ---"
+# 03-modify 全靠 mount -o loop 改文件。这里拿一个新做的 ext4 提前试挂一次，
+# 免得 5GB 下载 + 解包跑完 30 分钟，才发现 runner 根本不支持 loop 挂载。
+dd if=/dev/zero of="$TMP/fs.img" bs=1M count=64 status=none
+mkfs.ext4 -q -F "$TMP/fs.img"
+mkdir -p "$TMP/mntt"
+if sudo mount -o loop,rw "$TMP/fs.img" "$TMP/mntt" 2>/dev/null; then
+  echo "挂载成功" | sudo tee "$TMP/mntt/probe.txt" >/dev/null
+  if [ "$(sudo cat "$TMP/mntt/probe.txt")" = "挂载成功" ]; then
+    echo "  ✓ loop 挂载 ext4 读写正常"
+  else
+    echo "::warning::挂上了但写入读回不一致"
+  fi
+  sudo umount "$TMP/mntt"
+else
+  echo "  ✗ rw 挂载失败，再试试只读 ..."
+  if sudo mount -o loop,ro "$TMP/fs.img" "$TMP/mntt" 2>/dev/null; then
+    echo "  → 只读能挂，读写不行"
+    sudo umount "$TMP/mntt"
+  else
+    echo "  → 只读也挂不上"
+  fi
+  echo "[dmesg 尾部]";        sudo dmesg 2>/dev/null | tail -20 || true
+  echo "[已占用 loop]";        sudo losetup -a 2>/dev/null || true
+  echo "[/proc/filesystems]";  grep -iE 'ext|fuse' /proc/filesystems || true
+  echo "[/dev/fuse 是否存在]"; ls -l /dev/fuse 2>/dev/null || echo "  无 /dev/fuse"
+  echo "::error::当前 runner 环境无法 loop 挂载 ext4 —— 03-modify（改文件）这条路走不通，先看上面的诊断"
+  exit 1
+fi
+
 echo
 echo "工具链全部就绪 ✅"

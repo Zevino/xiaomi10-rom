@@ -19,6 +19,45 @@ shopt -s nullglob
 
 declare -A MPATH   # 逻辑名 -> 挂载目录（含别名）
 
+# 注意：declare -A 出来的空数组在 set -u 下取 ${#ARR[@]} 会报 unbound variable，
+# 所以挂载成功与否用显式计数器判断，不要依赖数组长度。
+MOUNT_COUNT=0
+
+# 挂载失败时把现场留下来 —— 含糊的 "bad superblock" 只有配合 dmesg 才能定位
+mount_diag() {
+  echo "---- 挂载失败诊断 ----"
+  echo "[dmesg 尾部]"
+  sudo dmesg 2>/dev/null | tail -20 || true
+  echo "[已占用的 loop 设备]"
+  sudo losetup -a 2>/dev/null || true
+  echo "[内核支持的 ext/erofs]"
+  grep -iE 'ext|erofs|f2fs' /proc/filesystems 2>/dev/null || true
+  echo "----------------------"
+}
+
+# $1=镜像 $2=挂载点；成功返回 0
+mount_img() {
+  local img="$1" dir="$2" loop="" e2log
+  sudo mkdir -p "$dir"
+
+  # 先 fsck 一遍：镜像若有元数据问题，挂载时只会回一句很含糊的 bad superblock
+  e2log="/tmp/e2fsck-$(basename "$dir").txt"
+  sudo e2fsck -fy "$img" > "$e2log" 2>&1 || true
+  echo "  fsck: $(tail -1 "$e2log")"
+
+  if sudo mount -o loop,rw "$img" "$dir" 2>/dev/null; then return 0; fi
+  echo "  直接 loop 挂载失败，改用显式 losetup ..."
+
+  if loop=$(sudo losetup -f --show "$img" 2>/dev/null); then
+    echo "  分配到 $loop"
+    if sudo mount -o rw "$loop" "$dir" 2>/dev/null; then return 0; fi
+    sudo losetup -d "$loop" 2>/dev/null || true
+  else
+    echo "  losetup 分配不出 loop 设备"
+  fi
+  return 1
+}
+
 # ---------- 1. 挂载所有 ext4 分区 ----------
 declare -A MOUNTED  # 真实挂载目录 -> 1（用于最终卸载）
 for img in "$OUT"/*.img; do
@@ -35,10 +74,10 @@ for img in "$OUT"/*.img; do
     continue
   fi
 
-  sudo mkdir -p "$MNT/$p"
-  if sudo mount -o loop,rw "$img" "$MNT/$p"; then
+  if mount_img "$img" "$MNT/$p"; then
     MOUNTED["$MNT/$p"]=1
     MPATH["$p"]="$MNT/$p"
+    MOUNT_COUNT=$((MOUNT_COUNT + 1))
     # 别名：system_a -> system（A-only 机型只是命名习惯带 _a）
     case "$p" in
       *_a)
@@ -56,13 +95,15 @@ for img in "$OUT"/*.img; do
     esac
   else
     echo "::warning::$p 挂载失败，跳过修改"
+    mount_diag
   fi
 done
 
-if [ ${#MOUNTED[@]} -eq 0 ]; then
-  echo "::error::没有任何分区挂载成功"
+if [ "$MOUNT_COUNT" -eq 0 ]; then
+  echo "::error::没有任何分区挂载成功，无法修改内容"
   exit 1
 fi
+echo "共挂载 $MOUNT_COUNT 个分区"
 
 echo "== 可用的分区名（config 里可用的前缀）=="
 printf '  %s\n' "$(printf '%s\n' "${!MPATH[@]}" | sort | tr '\n' ' ')"
