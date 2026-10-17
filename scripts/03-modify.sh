@@ -42,18 +42,25 @@ mount_img() {
   e2log="/tmp/e2fsck-$name.txt"
   sudo mkdir -p "$dir"
 
-  # 小米的 ext4 带着内核不认识的 ro_compat 位（largest_file=0x4000，e2fsprogs>=1.47
-  # 写的，内核到 6.8 都没实现）。内核发现不认识就拒绝 rw 挂载，dmesg 里是这句：
+  # 小米的 ext4 带着 AOSP 专有的 ro_compat 位 shared_blocks(0x4000)。注意撞名：
+  # 主线 e2fsprogs 在同一个 bit 上定义的是 largest_file（无害的统计位），
+  # 但小米镜像是 AOSP fork 做的，这个位实际是 shared_blocks，内核不认识，
+  # 于是拒绝 rw 挂载：
   #   EXT4-fs (loop0): couldn't mount RDWR because of unsupported optional features (4000)
   echo "  $name 超级块："
   sudo tune2fs -l "$img" 2>/dev/null \
     | grep -E '^Filesystem features' | sed 's/^/    /' || echo "    (tune2fs 读不出来)"
 
+  # 清标志位之前必须先确认镜像里没有真的共享块。一旦有，下面的 rm 会把
+  # 别的 inode 还在引用的块当成空闲块释放，属于静默损坏，绝不能往下走。
+  python3 "$REPO/scripts/check_shared_blocks.py" "$img" || return 1
+
   # ---- 策略 1：只清掉内核不认识的位，改完 fsck 重算超级块校验和 ----
   echo "  [策略1] 清掉内核不认识的 ro_compat 位"
   python3 "$REPO/scripts/fix_ext4_features.py" "$img" || true
   sudo e2fsck -fy "$img" > "$e2log" 2>&1 || true
-  echo "    fsck: $(tail -1 "$e2log")"
+  echo "    fsck 输出："
+  sed 's/^/      /' "$e2log"
   if sudo mount -o loop,rw "$img" "$dir" 2>/dev/null; then return 0; fi
   echo "    仍挂不上"
 
@@ -63,7 +70,8 @@ mount_img() {
   echo "  [策略2] 连 metadata_csum 一起清掉"
   python3 "$REPO/scripts/fix_ext4_features.py" --no-csum "$img" || true
   sudo e2fsck -fy "$img" > "$e2log" 2>&1 || true
-  echo "    fsck: $(tail -1 "$e2log")"
+  echo "    fsck 输出："
+  sed 's/^/      /' "$e2log"
   if sudo mount -o loop,rw "$img" "$dir" 2>/dev/null; then return 0; fi
   echo "    仍挂不上"
 

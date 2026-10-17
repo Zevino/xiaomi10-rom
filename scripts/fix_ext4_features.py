@@ -3,16 +3,21 @@
 
 背景
 ----
-小米这些分区镜像带着 largest_file(0x4000)。这个特性是 e2fsprogs >= 1.47 在 mkfs
-时写进超级块的，只记录一个「最大文件大小」的统计数字，Linux 内核到 6.8 都还没
-实现。内核发现不认识的 ro_compat 位就直接拒绝读写挂载，dmesg 里留的是这句：
+小米这些分区镜像带着 AOSP 专有的 RO_COMPAT 特性 shared_blocks(0x4000)。
 
+这里有个要命的撞名：主线 e2fsprogs 1.47 在同一个 bit 上定义的是 largest_file，
+一个无害的「最大文件大小」统计位。小米镜像是 AOSP 的 e2fsprogs fork 做出来的，
+同一个 bit 在那边叫 shared_blocks，含义完全不同 —— 它表示镜像里可能有被多个
+inode 共用的数据块（e2fsdroid -s 做相同文件去重时产生的）。
+
+内核发现不认识的 ro_compat 位就直接拒绝读写挂载（只读是允许的），dmesg 里是：
     EXT4-fs (loop0): couldn't mount RDWR because of unsupported optional features (4000)
 
-只读挂载是允许的 —— 所以 mkfs 自己做的测试镜像能挂上（它没这个位），小米的不行。
+所以必须清掉这个位才能 rw 挂上去改文件。但清位本身并不解决共享块问题：
+如果镜像里真有共享块，rw 挂载后删文件会把别的 inode 还在用的块释放掉。
+因此 03-modify.sh 在清位之前会先跑 check_shared_blocks.py 确认干净。
 
-清掉这个位对文件内容、inode、权限、SELinux 上下文都没有任何影响：它不是数据。
-但改过超级块之后 s_checksum 就对不上了，所以下一步必须跑 e2fsck 重算校验和。
+改过超级块之后 s_checksum 就对不上了，所以下一步必须跑 e2fsck 重算校验和。
 
 用法: fix_ext4_features.py <ext4-image>
 """
@@ -64,7 +69,7 @@ def selftest() -> int:
             return st.unpack_from("<I", fh.read(), SB + 0x64)[0]
 
     cases = [
-        ("小米镜像：带 largest_file(0x4000)", 0x046B | 0x4000, 0x046B),
+        ("小米镜像：带 shared_blocks(0x4000)", 0x046B | 0x4000, 0x046B),
         ("本来就干净，不能误伤", 0x046B, 0x046B),
         ("多个未知位 0x4000|0x0800", 0x046B | 0x4000 | 0x0800, 0x046B),
         ("orphan_present(0x10000) 内核支持，保留", 0x046B | 0x4000 | 0x10000, 0x1046B),
