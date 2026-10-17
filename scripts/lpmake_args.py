@@ -57,6 +57,12 @@ def parse_lpdump(text):
         "parts": [],       # [(name, group, attributes)]
     }
 
+    # lpdump 会按槽位分节打印（"Slot 0:" / "Slot 1:"）。只解析第一节，
+    # 否则分组表/分区表会被解析两遍，--group 传两次 lpmake 会直接报错。
+    slot_marks = list(re.finditer(r"^Slot \d+:\s*$", text, re.M))
+    if len(slot_marks) >= 2:
+        text = text[: slot_marks[1].start()]
+
     m = re.search(r"Metadata max size:\s*(\d+)", text)
     if m:
         info["md_size"] = int(m.group(1))

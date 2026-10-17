@@ -23,16 +23,23 @@ echo "== 解内层 .tar =="
   done
 )
 
-IMAGES=$(find "$FW" -maxdepth 3 -type d -name images | head -1)
+# 注意：脚本开着 set -euo pipefail，`写命令 | head` 这种写法非常危险 ——
+# head 读够行数就关管道，上游（ls/find）再写就是 SIGPIPE，pipefail 会把它变成
+# 非零退出码，直接把整个脚本干掉（纯竞态，上次跑过纯属运气）。
+# 所以：一律先落盘，再用 head 读文件。
+IMAGES=$(find "$FW" -maxdepth 3 -type d -name images -print -quit)
 if [ -z "$IMAGES" ]; then
   echo "::error::解出来没找到 images/ 目录，请确认这是 fastboot 线刷包（.tgz）而不是卡刷包（.zip）"
-  find "$FW" -maxdepth 2 | head -50
+  find "$FW" -maxdepth 2 > "$LOGS/fw_tree.txt" 2>&1 || true
+  head -50 "$LOGS/fw_tree.txt"
   exit 1
 fi
 echo "images 目录：$IMAGES"
 
 cp -a "$IMAGES"/. "$STOCK"/
-ls -lh "$STOCK" | head -60
+ls -lh "$STOCK" > "$LOGS/stock_images.txt" 2>&1 || true
+echo "images/ 共 $(wc -l < "$LOGS/stock_images.txt") 行，前 60 行："
+head -60 "$LOGS/stock_images.txt"
 
 # 立刻删掉 tgz / tar，省下 ~12GB
 rm -rf "$FW" "$SRC"
