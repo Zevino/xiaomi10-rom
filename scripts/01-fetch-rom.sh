@@ -12,7 +12,9 @@ cd "$SRC"
 if [ -n "${ROM_URL:-}" ]; then
   echo "== 直接从 URL 下载 =="
   echo "$ROM_URL"
-  curl -fL --retry 5 --retry-delay 5 --retry-all-errors -o rom.tgz "$ROM_URL"
+  # -C - 支持断点续传：5GB 的包万一半路断了，重试能从断点接着下
+  curl -fL -C - --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 \
+       -o rom.tgz "$ROM_URL"
 
 elif [ -n "${ROM_RELEASE_TAG:-}" ]; then
   echo "== 从 Release 拉取：$ROM_RELEASE_TAG =="

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # 小米10青春版 (vangogh) 刷入改过的 super.img —— Linux / macOS 版
 # 把 super.img、vbmeta*.img 和本脚本放同目录，然后：bash flash-modded.sh
+#
+# ★ 本脚本只刷 super（+ vbmeta），不动 boot/modem/xbl 等底包分区。
+#   所以手机当前底包必须和 super 的来源版本一致（例如都是 22.4.7）。
+#   底包不一致时，先用官方线刷包的 flash_all.bat 完整刷一遍，再跑本脚本。
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -25,10 +29,13 @@ fastboot flash super super.img
 
 echo
 echo "=== 2/4 关闭 AVB 校验（关键）==="
-for f in vbmeta vbmeta_system vbmeta_vendor; do
+# vangogh 官方 flash_all.bat 只刷 vbmeta 和 vbmeta_system，没有 vbmeta_vendor
+for f in vbmeta vbmeta_system; do
   if [ -f "$f.img" ]; then
     echo "-- $f"
     fastboot --disable-verity --disable-verification flash "$f" "$f.img"
+  else
+    echo "[警告] 缺少 $f.img，跳过"
   fi
 done
 

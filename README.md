@@ -5,7 +5,7 @@
 
 - 设备：`vangogh`（小米10青春版 / Mi 10 Youth / Mi 10 Lite Zoom）
 - 平台：SM7250 骁龙 765G，**A-only 单槽 + 动态分区**，`system/vendor/product/system_ext/odm` 全是 **ext4**
-- `super` 大小：`9126805504` 字节；校验：AVB（`vbmeta` / `vbmeta_system` / `vbmeta_vendor`）
+- `super` 大小：`9126805504` 字节；校验：AVB（本机只有 `vbmeta` / `vbmeta_system`，**没有 `vbmeta_vendor`**）
 
 ---
 
@@ -38,6 +38,32 @@ git push -u origin main
 把这条 URL 填进 workflow 的 `rom_url`。
 
 > 官方 CDN 的下载一般不需要登录、无验证码，CI 能直接 `curl`。
+
+#### 已验证可用的直链（实测）
+
+**推荐用稳定版**（两个我都验过，结构完全一致，稳定版更新、更省心）：
+
+```
+# ① 稳定版 V13.0.9.0.SJVCNXM（推荐）— 2022-11-02，约 5.03 GiB
+https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/V13.0.9.0.SJVCNXM/vangogh_images_V13.0.9.0.SJVCNXM_20221102.0000.00_12.0_cn_2a6eaf2737.tgz
+
+# ② 开发版 weekly 22.4.7 — 2022-04-07，约 5.32 GiB
+https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/22.4.7/vangogh_pre_images_22.4.7_20220407.0000.00_12.0_cn_c435df2852.tgz
+```
+
+| 项 | ① V13.0.9.0（推荐） | ② 22.4.7 |
+|---|---|---|
+| 类型 | **稳定版** | 开发版 weekly |
+| 日期 | 2022-11-02 | 2022-04-07 |
+| 大小 | 5,405,130,226 B ≈ 5.03 GiB | 5,715,247,474 B ≈ 5.32 GiB |
+| `super.img` | ✅ 有 | ✅ 有 |
+| 结构 | `<包名>/images/` | `<包名>/images/` |
+| `vbmeta_vendor` | ❌ 无（只有 `vbmeta`+`vbmeta_system`） | ❌ 无 |
+| 直连 | HTTP 200 / Range 206，**不用代理** | 同 |
+
+> ⚠️ 官方 `flash_all.bat` 会刷 50+ 个分区（xbl/tz/modem/boot/dtbo/recovery/cust…），
+> 而本流程只重做 `super`。**手机当前底包必须和 super 的来源版本一致**，
+> 否则先用同一个官方包的 `flash_all.bat` 完整刷一遍，再刷我们的 `super`。
 
 ### 方案 B：自己上传到 Release（直链拿不到时用）
 1. 本机下好 vangogh 的 fastboot 线刷包（`.tgz`，约 5 GB）。
@@ -77,7 +103,7 @@ Release 里你会看到：
 ```
 super.img.part-aa / part-ab / part-ac     # 5GB 左右，切片的完整 super
 system_modified.img(.part-*)              # 可选：只改过的 system 分区
-vbmeta.img / vbmeta_system.img / vbmeta_vendor.img
+vbmeta.img / vbmeta_system.img
 flash-modded.bat / flash-modded.sh
 SHA256SUMS.txt / debloat-used.txt / props-used.tsv
 ```
@@ -103,14 +129,20 @@ cat super.img.part-* > super.img
 前置：**必须先解锁 BL**（小米解锁工具 Mi Unlock，绑账号 + 通常要等 168 小时）。
 未解锁的话，任何改动过的镜像都刷不进去。
 
-1. 把所有文件放同一个文件夹（`super.img`、`vbmeta*.img`、`flash-modded.bat`）。
+1. 把所有文件放同一个文件夹（`super.img`、`vbmeta.img`、`vbmeta_system.img`、`flash-modded.bat`）。
 2. 手机关机 → 按住 **音量下 + 电源** 进入 fastboot（屏幕出现 FASTBOOT 字样）。
 3. 双击 `flash-modded.bat`。它会：
    - `fastboot flash super super.img`
-   - 对 `vbmeta / vbmeta_system / vbmeta_vendor` 加 `--disable-verity --disable-verification` 重刷
+   - 对 `vbmeta / vbmeta_system` 加 `--disable-verity --disable-verification` 重刷
      → **这一步是必须的**，否则改过的 system 过不了校验，会无限重启
+     （vangogh 只有这两个 vbmeta 分区，官方 `flash_all.bat` 也只刷这两个，**没有 `vbmeta_vendor`**）
    - `fastboot -w` 清数据 → `fastboot reboot`
 4. 首次开机慢（3–10 分钟）属正常。
+
+> ⚠️ **底包必须一致**：`flash-modded.bat` 只刷 `super` + vbmeta，**不动 boot/modem/xbl 等底包分区**。
+> 如果手机现在的底包不是 `super` 的来源版本（例如 super 来自 V13.0.9.0 但手机还是 V13.0.4.0），
+> 先用**同一个官方包**的 `flash_all.bat` 完整刷一遍，再跑 `flash-modded.bat`。
+> 一般可以 `fastboot reboot bootloader` 后直接执行官方 `flash_all.bat`。
 
 **如果只想小改一处**：也可以只用 `system_modified.img`，进 `fastbootd` 单刷（不用整包）：
 
@@ -122,7 +154,12 @@ fastboot reboot
 ```
 
 也可以用回官方 `flash_all.bat`：把官方 `images\super.img` 换成我们的 `super.img` 再跑，
-但**跑完必须再单独执行三条 vbmeta 命令**（`flash_all.bat` 会把官方 vbmeta 又写回去）。
+但**跑完必须再单独执行两条 vbmeta 命令**（`flash_all.bat` 会把官方 vbmeta 又写回去）：
+
+```cmd
+fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img
+fastboot --disable-verity --disable-verification flash vbmeta_system vbmeta_system.img
+```
 
 ---
 

@@ -12,7 +12,8 @@ STAGE="$WORK/stage"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 
 # ---- 一起分发的小文件（刷机必需）----
-for f in vbmeta.img vbmeta_system.img vbmeta_vendor.img; do
+# vangogh 只有 vbmeta 和 vbmeta_system（没有 vbmeta_vendor）
+for f in vbmeta.img vbmeta_system.img; do
   if [ -f "$STOCK/$f" ]; then cp "$STOCK/$f" "$STAGE/"; else echo "[提示] stock 里没有 $f"; fi
 done
 cp "$REPO/scripts/flash-modded.sh" "$STAGE/"
